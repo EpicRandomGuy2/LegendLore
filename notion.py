@@ -25,9 +25,9 @@ from pprint import pprint
 def send_to_notion(
     post,
     overwrite=False,
+    update_score=False,
+    updated_score_titles=set(),
     subreddit=None,
-    notion_map_database=None,
-    notion_titles_list=None,
     credentials=CREDENTIALS_FILE,
 ):
     if not subreddit:
@@ -35,9 +35,21 @@ def send_to_notion(
 
     # https://developers.notion.com/reference/post-page
 
-    # If dupe and no overwrite, skip this post
-    if handle_duplicates(post, overwrite, subreddit=subreddit) == False:
+    # If a post exists in Notion already and needs its score updated, do it and exit
+    if (
+        update_score == True
+        and post["sent_to_notion"] == True
+        and post["title"] in updated_score_titles
+    ):
+        # print(f"Dry run: Updating {post['title']}")
+        send_updated_score_to_notion(
+            post, subreddit=subreddit, credentials=CREDENTIALS_FILE
+        )
         return
+    # If dupe and no overwrite, skip this post
+    elif handle_duplicates(post, overwrite, subreddit=subreddit) == False:
+        return
+    # Else if post does not exist, or if we are overwriting, make post as usual
 
     with open(credentials) as credentials_json:
         credentials = json.load(credentials_json)
@@ -55,6 +67,15 @@ def send_to_notion(
             # Skip the GPT-4V tag, does nothing for users but is useful in MongoDB
             tags = post["tags"][:-1]
             # print(tags)
+
+            # If it's a regional map, drop the other tags because they are very cluttery
+            # For Town/City, it sometimes tagged very gratuitously on something that should
+            # have honestly been regional, so correct that here. Arbitrarily picked 8+, saw
+            # some normal battlemaps with 8.
+            if "Regional/World" in str(post["tags"]):
+                tags = [{"name": "Regional/World"}]
+            elif "Town/City" in str(post["tags"]) and len(post["tags"]) >= 8:
+                tags = [{"name": "Regional/World"}]
 
             body = {
                 "parent": {"database_id": NOTION_DB_ID},
@@ -170,10 +191,19 @@ def send_to_notion(
                         print(modified_url)
                 else:
 
+                    # Hashtag in url breaks it, so don't take it
+                    if "#" in modified_url:
+                        modified_url = modified_url[: modified_url.rfind("#")]
+
                     image_id = modified_url[
                         modified_url.rfind("/") + 1 : modified_url.rfind(".")
                     ]
-                    # print(image_id)
+                    print(image_id)
+
+                    # If the first one failed because there's no extension, just take the end of the url
+                    if image_id == "":
+                        image_id = modified_url[modified_url.rfind("/") + 1 :]
+                        print(image_id)
 
                     response = requests.get(
                         f"https://api.imgur.com/3/image/{image_id}",
@@ -206,6 +236,7 @@ def send_to_notion(
             # There's a third condition where the link goes somewhere else like Patreon but an image is embedded in the post - figure it out
             # Condition 5 - post removed from imgur (removed.png) or 404 (not sure why one happens over the other when they both have the same effect)
             # Condition 6 - x-post subreddit
+            # Condition 7: Inkarnate.com
             # If none of the above set sent_to_notion so it doesn't try again, and skip the actual send
             else:
                 set_sent_to_notion(post, subreddit=subreddit)
@@ -266,8 +297,6 @@ def handle_duplicates(
     post,
     overwrite,
     subreddit=None,
-    notion_map_database=None,
-    notion_titles_list=None,
     credentials=CREDENTIALS_FILE,
 ):
 
@@ -331,98 +360,19 @@ def handle_duplicates(
         print(f"{post['title']} not tagged sent_to_notion, proceeding...")
         return True
 
-    ##############
 
-    # if not notion_map_database:
-    # notion_map_database = get_notion_db_state()
-    # notion_titles_list = [
-    #     page["properties"]["Name"]["title"][0]["text"]["content"]
-    #     for page in notion_map_database
-    # ]
-
-    # print(map_database)
-
-    # with open(credentials) as credentials_json:
-    #     credentials = json.load(credentials_json)
-
-    # token = credentials["notion_token"]
-
-    # Check that we're not inserting a duplicate - if the Title exists, delete (archive) all duplicates so we can make a new one
-    # for page in notion_map_database:
-    #     if post["title"] == page["properties"]["Name"]["title"][0]["text"]["content"]:
-
-    # print(len(notion_titles_list))
-    # if post["title"] in notion_titles_list:
-    #     for page in notion_map_database:
-    #         if (
-    #             post["title"]
-    #             == page["properties"]["Name"]["title"][0]["text"]["content"]
-    #         ):
-    #             page_id = page["id"]
-    #             headers = {
-    #                 "Authorization": "Bearer " + token,
-    #                 "Content-Type": "application/json",
-    #                 "Notion-Version": "2022-06-28",
-    #             }
-
-    #             notion_url = f"https://api.notion.com/v1/pages/{page_id}"
-
-    #             update_payload = {"archived": True}
-
-    #             if overwrite == True:
-    #                 print(f"Duplicate page found for {post['title']}, deleting...")
-    #                 res = requests.patch(
-    #                     notion_url, json=update_payload, headers=headers
-    #                 )
-    #                 # print(page_id, res.json())
-    #                 set_sent_to_notion(post, False)
-    #             else:
-    #                 print(f"Duplicate page found for {post['title']}, skipping...")
-    #                 # set_sent_to_notion(post)
-    #                 return False  # If not overwriting just break out of the function - nothing to do here.
-
-    # print(len(notion_map_database))
-    # print(f"{post['title']} not found in Notion, proceeding...")
-    # return True
-
-
-def get_notion_db_state(database_id=NOTION_DB_ID, credentials=CREDENTIALS_FILE):
+def send_updated_score_to_notion(
+    post,
+    subreddit=None,
+    credentials=CREDENTIALS_FILE,
+):
+    if not subreddit:
+        subreddit = post["subreddit"]
 
     with open(credentials) as credentials_json:
         credentials = json.load(credentials_json)
 
     token = credentials["notion_token"]
-
-    print(f"Getting state for Notion database {database_id}...")
-    stop_event = threading.Event()
-    timer_thread = threading.Thread(target=timer, args=(stop_event,))
-    timer_thread.start()
-
-    notion_client = Client(auth=token, timeout_ms=300000)
-
-    try:
-        notion_map_database = collect_paginated_api(
-            notion_client.databases.query, database_id=database_id
-        )
-    except Exception as e:
-        print("Error getting Notion DB state:", e)
-
-    stop_event.set()
-    timer_thread.join()
-    return notion_map_database
-
-
-def get_notion_db_state_2(database_id=NOTION_DB_ID, credentials=CREDENTIALS_FILE):
-
-    with open(credentials) as credentials_json:
-        credentials = json.load(credentials_json)
-
-    token = credentials["notion_token"]
-
-    print(f"Getting state for Notion database {database_id}...")
-    stop_event = threading.Event()
-    timer_thread = threading.Thread(target=timer, args=(stop_event,))
-    timer_thread.start()
 
     headers = {
         "Authorization": "Bearer " + token,
@@ -430,148 +380,26 @@ def get_notion_db_state_2(database_id=NOTION_DB_ID, credentials=CREDENTIALS_FILE
         "Notion-Version": "2022-06-28",
     }
 
-    notion_url = f"https://api.notion.com/v1/databases/{database_id}/query"
-
-    # payload = {"page_size": 100}
-
-    response = requests.post(notion_url, headers=headers)
-
-    if response.status_code == 200:
-        notion_map_database = response.json()
-
-        print(notion_map_database)
-
-        stop_event.set()
-        timer_thread.join()
-        return notion_map_database["results"]
-    else:
-        print("Error getting Notion DB state:", response.status_code, response.text)
-        stop_event.set()
-        timer_thread.join()
-
-
-def get_notion_db_state_generator(
-    database_id=NOTION_DB_ID, credentials=CREDENTIALS_FILE
-):
-    with open(credentials) as credentials_json:
-        credentials = json.load(credentials_json)
-
-    token = credentials["notion_token"]
-
-    print(f"Getting API generator for Notion database {database_id}...")
-
-    notion_client = Client(auth=token, timeout_ms=300000)
-
-    return iterate_paginated_api(notion_client.databases.query, database_id=database_id)
-
-
-def timer(stop_event):
-    seconds = 0
-    while not stop_event.is_set():
-        print("\rTimer:", seconds, "seconds", end="", flush=True)
-        seconds += 1
-        time.sleep(1)
-
-
-def build_notion_titles_list(
-    notion_map_database_generator, notion_map_database, notion_titles_list
-):
-    count = 0
-    for page in notion_map_database_generator:
-        # print(page["properties"]["Name"]["title"][0]["text"]["content"])
-        notion_titles_list.append(
-            page["properties"]["Name"]["title"][0]["text"]["content"]
-        )
-        notion_map_database.append(page)
-
-        count += 1
-        if count % 100 == 0:
-            print("Fetching Notion database from API...", len(notion_titles_list))
-
-    return notion_titles_list
-
-
-"""
-
-    # Check that we're not inserting a duplicate - if the Title exists, delete (archive) all duplicates so we can make a new one
-    if map_database["results"] != []:
-        for page in map_database["results"]:
-            # print(page)
-            page_id = page["id"]
-
-            headers = {
-                "Authorization": "Bearer " + token,
-                "Content-Type": "application/json",
-                "Notion-Version": "2022-06-28",
-            }
-
-            notion_url = f"https://api.notion.com/v1/pages/{page_id}"
-
-            update_payload = {"archived": True}
-
-            if overwrite == True:
-
-                res = requests.patch(notion_url, json=update_payload, headers=headers)
-
-                # print(page_id, res.json())
-                print("Duplicate page found, deleting...")
-                print(embed_url + urllib.parse.quote(thumbnail))
-                print(page_id)
-            else:
-                print("Duplicate page found, skipping...")
-                print(embed_url + urllib.parse.quote(thumbnail))
-                return  # If not overwriting just break out of the function - nothing to do here.
-
-    new_page = {
-        "Name": {"title": [{"text": {"content": title}}]},
-        "Tags": {"type": "multi_select", "multi_select": tags},
+    notion_search_url = f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query"
+    search_payload = {
+        "filter": {"property": "Name", "title": {"equals": post["title"]}}
     }
 
-    page_response = notion.pages.create(
-        parent={"database_id": NOTION_DB_ID}, properties=new_page
+    search_response = requests.post(
+        notion_search_url, json=search_payload, headers=headers
     )
 
-    # print("PAGE_RESPONSE:", page_response, "\n\n\n\n")
+    # print(search_response.json())
 
-    page_id = page_response["id"]
+    for page in search_response.json()["results"]:
 
-    notion.blocks.children.append(
-        block_id=page_id,
-        children=[
-            {
-                "object": "block",
-                "embed": {"url": embed_url + urllib.parse.quote(thumbnail)},
-            },
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [
-                        {
-                            "type": "text",
-                            "text": {"content": f"Variants: {variants}"},
-                        }
-                    ]
-                },
-            },
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [
-                        {
-                            "type": "text",
-                            "text": {
-                                "content": f"{url + urllib.parse.quote(path)}",
-                                "link": {"url": f"{url + urllib.parse.quote(path)}"},
-                            },
-                        }
-                    ]
-                },
-            },
-        ],
-    )
+        notion_page_url = f"https://api.notion.com/v1/pages/{page['id']}"
 
-    print(f"Sent {title} to Notion")
-    # print(map_database, "\n")
-"""
+        update_payload = {"properties": {"Score": {"number": post["score"]}}}
+        print(f"Updating score for {post['title']} in Notion...")
+
+        update_response = requests.patch(
+            notion_page_url, json=update_payload, headers=headers
+        )
+
+        # print(update_response.json())

@@ -15,7 +15,11 @@ from config import (
 
 
 def get_subreddit_posts(
-    subreddit=DEFAULT_SUBREDDIT, limit=None, credentials=CREDENTIALS_FILE
+    subreddit=DEFAULT_SUBREDDIT,
+    limit=None,
+    update=False,
+    number_of_days_old=None,
+    credentials=CREDENTIALS_FILE,
 ):
 
     # https://praw.readthedocs.io/en/stable/getting_started/quick_start.html
@@ -45,8 +49,21 @@ def get_subreddit_posts(
 
     try:
         for post in subreddit_new:
-            if mongodb_local.post_id_in_db(post.id, subreddit):
+            if update == False and mongodb_local.post_id_in_db(post.id, subreddit):
                 break
+
+            if number_of_days_old != None:
+
+                created_time = datetime.datetime.fromtimestamp(post.created_utc)
+
+                current_time = datetime.datetime.now()
+
+                number_of_days_ago = current_time - datetime.timedelta(
+                    days=number_of_days_old
+                )
+
+                if created_time < number_of_days_ago:
+                    break
 
             post_data = {
                 "permalink": post.permalink,
@@ -78,7 +95,7 @@ def get_subreddit_posts(
 
             subreddit_posts.append(post_data)
             # print(post_data)
-            sleep(2)
+            # sleep(2)
     except Exception as e:
         print(e)
         print("Probably hit a rate limit, continuing with what we've got...")
@@ -212,3 +229,51 @@ def send_recent_posts_to_db(subreddit=DEFAULT_SUBREDDIT, limit=None):
         mongodb_local.add_post_to_db(post, "all", database=database_all)
         # else:
         #     print(f"{post['title']} is already in MongoDB, skipping...")
+
+
+def update_recent_scores_in_db(
+    subreddit=DEFAULT_SUBREDDIT, limit=None, number_of_days_old=7
+):
+
+    print(
+        f"Fetching posts from r/{subreddit} less than {number_of_days_old} days old and sending new scores to MongoDB..."
+    )
+
+    # battlemaps
+    # dndmaps
+    # fantasymaps
+    # inkarnate
+    # dungeondraft
+    subreddit_posts = get_subreddit_posts(
+        subreddit=subreddit,
+        limit=limit,
+        update=True,
+        number_of_days_old=number_of_days_old,
+    )
+    print(len(subreddit_posts))
+
+    # Get database client
+    database_client = mongodb_local.get_database_client(CONNECTION_STRING, DB_NAME)
+    database_subreddit = database_client[subreddit]
+    database_all = database_client["all"]
+
+    print(database_client)
+
+    # If the score gets updated, add it to this list so we can
+    # process them faster later
+
+    updated_score_titles = set()
+
+    # Add maps to database (skip duplicates)
+    for post in subreddit_posts:
+        # if not mongodb_local.post_in_db(post["title"], "all"):
+        mongodb_local.update_post_score(
+            post, post["subreddit"], database=database_subreddit
+        )
+        updated_score_titles.add(
+            mongodb_local.update_post_score(post, "all", database=database_all)
+        )
+        # else:
+        #     print(f"{post['title']} is already in MongoDB, skipping...")
+
+    return updated_score_titles

@@ -1,4 +1,4 @@
-examples/
-__pycache__/
+examples
+__pycache__
 credentials.json
-pushshift/
+pushshift*

@@ -13,6 +13,7 @@ import copy
 import backoff
 import mongodb_local
 import openai
+from bs4 import BeautifulSoup
 from openai import OpenAI
 from pandas import DataFrame
 from config import CONNECTION_STRING, DB_NAME, DEFAULT_SUBREDDIT, TAGS, CREDENTIALS_FILE
@@ -21,6 +22,11 @@ from config import CONNECTION_STRING, DB_NAME, DEFAULT_SUBREDDIT, TAGS, CREDENTI
 def is_tagged_gpt4v(post):
 
     return "GPT-4V" in str(post["tags"])
+
+
+def is_tagged_untagged(post):
+
+    return "Untagged" in str(post["tags"])
 
 
 def get_first_image(post, credentials=CREDENTIALS_FILE):
@@ -59,13 +65,20 @@ def get_first_image(post, credentials=CREDENTIALS_FILE):
         except (AttributeError, KeyError) as e:
             print(f"{e}: https://www.reddit.com{post['permalink']}")
             return None
-
+    elif "reddituploads" in post["url"]:
+        return post["url"]
     # Condition 4 - imgur albums /a/ , /gallery/ - This embeds in Notion but not API, may need to just get the first image, or all of them and embed them in sequence
     # Condition 4.5 - imgur embeds (non-gallery) randomly not working - fixed by getting direct link to image
     elif "imgur.com" in post["url"]:
 
         # Change all http links to https or Imgur 404s
-        modified_url = post["url"].replace("http://", "https://")
+        modified_url = (
+            post["url"]
+            .strip("/")
+            .strip("/new")
+            .strip("/all")
+            .replace("http://", "https://")
+        )
 
         # Need to do some imgur API nonsense to get all the direct image links out of galleries
         if "imgur.com/a/" in modified_url or "imgur.com/gallery/" in modified_url:
@@ -97,14 +110,22 @@ def get_first_image(post, credentials=CREDENTIALS_FILE):
                 # But they could be historically interesting/useful, so I'm not sure. Leaving it in for now.
                 print("Imgur Error:", response.status_code)
                 print(modified_url)
-
-                return None
+                return 404
         else:
+
+            # Hashtag in url breaks it, so don't take it
+            if "#" in modified_url:
+                modified_url = modified_url[: modified_url.rfind("#")]
 
             image_id = modified_url[
                 modified_url.rfind("/") + 1 : modified_url.rfind(".")
             ]
-            # print(image_id)
+            print(image_id)
+
+            # If the first one failed because there's no extension, just take the end of the url
+            if image_id == "":
+                image_id = modified_url[modified_url.rfind("/") + 1 :]
+                print(image_id)
 
             response = requests.get(
                 f"https://api.imgur.com/3/image/{image_id}",
@@ -116,17 +137,37 @@ def get_first_image(post, credentials=CREDENTIALS_FILE):
             # Check if the request was successful
             if response.status_code == 200:
                 # Parse the JSON response
-
                 # print("IMGUR SINGLE IMAGE", response.text)
-
                 return response.json()["data"]["link"]
 
             else:
                 # If image doesn't exist anymore, considering set_sent_to_notion(post) and break-ing, to keep dead links out of the database
                 # But they could be historically interesting/useful, so I'm not sure. Leaving it in for now.
                 print("Imgur Error:", response.status_code)
-                print(modified_url, response.text)
-                return None
+                print(modified_url)  # , response.text)
+                return 404
+    # Doesn't work, uses JS and would need to run Selenium to extract urls. Too slow, too complicated right now.
+    # elif "inkarnate.com" in post["url"]:
+    #     response = requests.get(post["url"])
+
+    #     if response.status_code == 200:
+    #         # Parse the HTML content
+    #         soup = BeautifulSoup(response.content, "html.parser")
+
+    #         # Find the image element by its id
+    #         preview_image = soup.find(id="view-map-page--preview-image")
+
+    #         # Check if the image element is found
+    #         if preview_image:
+    #             # Get the src attribute value
+    #             image_src = preview_image.get("src")
+    #             return image_src
+    #         else:
+    #             return None
+    #     else:
+    #         print("Inkarnate Error:", response.status_code)
+    #         print(post["url"])  # , response.text)
+    #         return 404
     else:
         return None
 
@@ -140,7 +181,7 @@ def giveup(details):
 @backoff.on_exception(
     backoff.expo, openai.RateLimitError, max_tries=3, on_giveup=giveup
 )
-def gpt4v_analyze_image(post, credentials=CREDENTIALS_FILE):
+def gpt4v_analyze_image(post, resolution="low", credentials=CREDENTIALS_FILE):
     # To do: Mostly rip the above GPT4V API stuff to pass in a URL and get tags back. Return list of tags.
     tags = []
 
@@ -152,7 +193,7 @@ def gpt4v_analyze_image(post, credentials=CREDENTIALS_FILE):
     api_key = credentials["openai_api_key"]
 
     # prompt = f"This is a Dungeons and Dragons top-down map. Title is {post['title']}. Provide a comma-separated list, no spaces, containing only exact terms from this list that are relevant to the image and title: {valid_tags}"
-    prompt = f"Analyze a D&D top-down map titled '{post['title']}'. List prominently featured terms from this list with commas, no spaces: {valid_tags}"
+    prompt = f"Analyze this D&D top-down map titled '{post['title']}'. In your response, only list prominently featured terms from this list with commas, no spaces: {valid_tags}"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
 
     first_image = get_first_image(post)
@@ -162,7 +203,25 @@ def gpt4v_analyze_image(post, credentials=CREDENTIALS_FILE):
         tags.append({"name": "Untagged"})
         tags.append({"name": "GPT-4V"})
         return tags
+    # Skip if 404
+    elif first_image == 404:
+        print(f"{post['title']} 404, skipping...")
+        tags.append({"name": "Untagged"})
+        tags.append({"name": "404"})
+        tags.append({"name": "GPT-4V"})
+        return tags
+    # Skip if over 20MB, GPT can't handle it
+    elif len(requests.get(first_image).content) >= 20971520:
+        print("Image is too large for GPT, skipping...")
+        tags.append({"name": "Untagged"})
+        tags.append({"name": "GPT-4V"})
+        return tags
     else:
+        # Imgur API is weirdly returning .jpg links when they should actually be .jpeg. Maybe cause they're old?
+        # Unsure if this is a consistent thing or if this is gonna introduce a bug. Can't afford to waste api calls trying both.
+        # if "i.imgur.com" in first_image:
+        #     first_image = first_image.replace("jpg", "jpeg")
+
         payload = {
             "model": "gpt-4-vision-preview",
             "messages": [
@@ -174,7 +233,8 @@ def gpt4v_analyze_image(post, credentials=CREDENTIALS_FILE):
                             "type": "image_url",
                             "image_url": {
                                 "url": first_image,
-                                "detail": "low",
+                                "detail": resolution,  # Really need this to be low, but it's not working on a subset of images that may need high to even recognize it received an image
+                                # To do: If vague error on image, try again on auto. Increases the API cost a ton. Expected monthly cost: $1.66
                             },
                         },
                     ],
@@ -188,6 +248,8 @@ def gpt4v_analyze_image(post, credentials=CREDENTIALS_FILE):
         )
 
         # To do - Rate limit handling
+
+        print("Sent to GPT:", first_image)
 
         print(response.json(), "\n")
 
@@ -211,7 +273,8 @@ def gpt4v_analyze_image(post, credentials=CREDENTIALS_FILE):
                     processed_tags.append({"name": tag})
                 else:
                     if tag != "":  # Just a funny artifact from the split
-                        print("Invalid Tag:", tag, "-- Discarding...", "\n")
+                        # print("Invalid Tag:", tag, "-- Discarding...", "\n")
+                        pass
 
             processed_tags = sorted(processed_tags, key=lambda x: x["name"])
 
@@ -252,13 +315,26 @@ def gpt4v_analyze_image(post, credentials=CREDENTIALS_FILE):
 
 def analyze_and_tag_post(post, append=False, subreddit=DEFAULT_SUBREDDIT):
     if not is_tagged_gpt4v(post) or append == True:
-        tags = gpt4v_analyze_image(post)
-        # mongodb_local.add_tags_to_post(post, tags, subreddit=subreddit)
+        tags = gpt4v_analyze_image(post, resolution="low")
         mongodb_local.add_tags_to_post(post, tags, subreddit=post["subreddit"])
         mongodb_local.add_tags_to_post(post, tags, subreddit="all")
     else:
         print(f"{post['title']} is already tagged, skipping tags...")
 
-        # After testing, tags will be updated in both DBs
-        # mongodb_local.add_tags_to_post(post, tags, subreddit=post["subreddit"])
-        # mongodb_local.add_tags_to_post(post, tags, subreddit="all")
+
+def analyze_untagged_post(post, append=False, subreddit=DEFAULT_SUBREDDIT):
+    # If post is tagged as Untagged due to some earlier failure or skip, try again, remove the Untagged tag before tagging.
+    # Also check to see if it's been sent to Notion already - if it has, skip it, can't afford to be updating old tags
+    if is_tagged_untagged(post) and post["sent_to_notion"] == False:
+        print(f"{post['title']} is tagged Untagged, doing second pass...")
+        tags = gpt4v_analyze_image(post, resolution="auto")
+        mongodb_local.reset_post_tags(
+            post, subreddit=post["subreddit"], confirm_all=True
+        )
+        mongodb_local.add_tags_to_post(post, tags, subreddit=post["subreddit"])
+        mongodb_local.reset_post_tags(post, subreddit="all", confirm_all=True)
+        mongodb_local.add_tags_to_post(post, tags, subreddit="all")
+
+
+# else:
+#     print(f"{post['title']} is already tagged, skipping tags...")

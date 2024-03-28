@@ -110,21 +110,23 @@ def reset_post_tags(
     connection_string=CONNECTION_STRING,
     db_name=DB_NAME,
     database=None,
+    confirm_all=False,
 ):
     if database == None:
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
-    confirm = input(
-        f"You are about to reset tags for {post['title']}. This process cannot be undone.\n \
-                Type RESET TAGS to continue: "
-    )
-
-    while confirm != "RESET TAGS":
+    if confirm_all == False:
         confirm = input(
-            "Incorrect input.\n \
-                Type RESET TAGS to continue: "
+            f"You are about to reset tags for {post['title']}. This process cannot be undone.\n \
+                    Type RESET TAGS to continue: "
         )
+
+        while confirm != "RESET TAGS":
+            confirm = input(
+                "Incorrect input.\n \
+                    Type RESET TAGS to continue: "
+            )
 
     query = {"title": post["title"]}
 
@@ -193,6 +195,37 @@ def set_sent_to_notion(
         # print(f"sent_to_notion {sent} added to {post_df['title']}")
 
 
+def update_post_score(
+    post,
+    sent=True,
+    subreddit=DEFAULT_SUBREDDIT,
+    connection_string=CONNECTION_STRING,
+    db_name=DB_NAME,
+    database=None,
+):
+
+    if database == None:
+        database_client = get_database_client(connection_string, db_name)
+        database = database_client[subreddit]
+
+    # Check to ensure post is unique in DB
+    query = {"title": post["title"]}
+
+    post_df = DataFrame(database.find(query))
+
+    # Update anything matching those keys in the query
+    for index, row in post_df.iterrows():
+        query = {"_id": row["_id"]}
+        new = {"$set": {"score": post["score"]}}
+        database.update_many(query, new)
+        # database_client["all"].update_many(query, new)
+
+        print(f"{post['title']} updated score from {row['score']} to {post['score']}")
+
+        if row["score"] != post["score"]:
+            return post["title"]
+
+
 def get_post_from_db(
     post_title,
     subreddit=DEFAULT_SUBREDDIT,
@@ -223,3 +256,23 @@ def get_all_posts_from_db(
     # Adding this filter to remove things with a score of 0 - they are usually spam or low-effort, downvoted posts (not maps)
     # Necessary to filter out dirty images, even if we miss a couple maps
     return DataFrame(database.find({"score": {"$gte": 1}}))
+
+
+def get_untagged_posts_from_db(
+    subreddit=DEFAULT_SUBREDDIT,
+    connection_string=CONNECTION_STRING,
+    db_name=DB_NAME,
+    database=None,
+):
+    if database == None:
+        database_client = get_database_client(connection_string, db_name)
+        database = database_client[subreddit]
+
+    # Adding this filter to remove things with a score of 0 - they are usually spam or low-effort, downvoted posts (not maps)
+    # Necessary to filter out dirty images, even if we miss a couple maps
+    # Also get all things tagged Untagged
+    return DataFrame(
+        database.find(
+            {"score": {"$gte": 1}, "tags": {"$elemMatch": {"name": "Untagged"}}}
+        )
+    )
