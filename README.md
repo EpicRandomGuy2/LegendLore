@@ -50,10 +50,11 @@ And thus the legend began...
 
 #### [LegendLore](https://legendlore.notion.site/) is a database consisting of a few key components:
 1. Python scripts - The Python scripts in this repo enable [LegendLore](https://legendlore.notion.site/) to find/tag/track state/push new maps
-2. MongoDB - Data on every post is stored on a MongoDB backend and processed later. At the time of writing, there are about 100k maps, and an additional 40k posts in the DB that could not be sent to Notion - either because they're not maps (question posts, spam, etc.) or the image links aren't yet supported.
-3. GPT4-Vision - Analyzes the maps and tags them based on a list of tags provided. This was the game-changer that finally let me fulfill the dream of organizing my map backlog.
-4. Docker/Cron - On my home server, I have two docker containers running - one every hour that just pushes new maps to Notion, and one every 6 hours that updates the scores of all maps less than a week old (to enable fair and accurate score sorting, I decided on a week cause scores have largely settled by then).
-5. Notion - The lovely visual database and web host that lets me show all the maps without having to worry about all that front-end stuff.
+2. Reddit - All maps are pulled from publicly available images on the above subreddits.
+3. MongoDB - Data on every post is stored on a MongoDB backend and processed later. At the time of writing, there are about 100k maps, and an additional 40k posts in the DB that could not be sent to Notion - either because they're not maps (question posts, spam, etc.) or the image links aren't yet supported.
+4. GPT4-Vision - Analyzes the maps and tags them based on a list of tags provided. This was the game-changer that finally let me fulfill the dream of organizing my map backlog.
+5. Docker/Cron - On my home server, I have two docker containers running - one every hour that just pushes new maps to Notion, and one every 6 hours that updates the scores of all maps less than a week old (to enable fair and accurate score sorting, I decided on a week cause scores have largely settled by then).
+6. Notion - The lovely visual database and web host that lets me show all the maps without having to worry about all that front-end stuff.
 
 #### Can I use [LegendLore](https://legendlore.notion.site/) for `insert thing here`?
 Sure! It's a bit purpose built at the moment, but using config.py, you can hook it up to your own Notion DB, MongoDB, GPT token, and subreddits and run it on whatever you want, doesn't even really have to be maps. Do keep in mind that the GPT calls cost a bit of money (like 0.3 cents per image on average).
