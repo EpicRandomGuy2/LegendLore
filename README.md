@@ -29,7 +29,7 @@ And thus the legend began...
 - The same map is in here twice!
     - There are duplicates due to the way "uniqueness" is implemented (a post is "unique" based on its title) - so a slight change in title (across multiple subreddits for example) will cause a duplicate. GPT might also tag each of the duplicates differently.
 - This map is tagged wrong!
-    - Unfortunately, GPT isn't perfect at tagging. I tried to provide it a little extra context in the form of the map title, which helped, but it still gets things wrong sometimes. There's also some custom logic that collapses `Town/City` maps with more than 8 tags into `Regional/World` due to an issue with how GPT tagged towns (just started throwing everything it could see in there) - sometimes this causes `Town/City` or `Regional/World` to be tagged incorrectly.
+    - Unfortunately, GPT isn't perfect at tagging. I tried to provide it a little extra context in the form of the map title, which helped, but it still gets things wrong sometimes. There's also some custom logic that collapses `Town/City` maps with more than 8 tags into `Regional/World` due to an issue with how GPT tagged towns (just started throwing everything it could see in there) - sometimes this causes `Town/City` or `Regional/World` to be tagged incorrectly. For fun, take a look at the surprisingly accurate `Giant Skeleton` tag!
 - A post from the subreddit is missing in [LegendLore](https://legendlore.notion.site/)!
     - [LegendLore](https://legendlore.notion.site/) can currently only handle Reddit and Imgur links/galleries. Working on support for other common sites like Patreon (public) and Inkarnate in the future!
 - Why is this map tagged `Untagged`?
