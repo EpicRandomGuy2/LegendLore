@@ -1,6 +1,6 @@
 # 🗺️[LegendLore](https://legendlore.notion.site/)
 
-![image](https://github.com/EpicRandomGuy2/LegendLore/assets/163953013/929803f1-2f92-4b2d-8a4b-5d986642de60)
+![image](https://github.com/EpicRandomGuy2/LegendLore/assets/163953013/2d69b427-658c-4ab2-aa87-c100ece89445)
 
 ### The story behind this project
 As a DM, I'm hopelessly addicted to maps. The stories they tell, the games we play on them, just the pretty colors and shapes - I began to hoard them like a dragon hoards shiny treasure. Unfortunately my hoard quickly became unmanageable. I couldn't keep up with the rate at which I was acquiring maps, and it became really hard to find the right one for a session, as my maps folder reached sizes that couldn't even be reasonably processed by the software I was using. 
