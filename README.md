@@ -68,4 +68,4 @@ I would love to say yes, but unfortunately I can't allow limited edit access at 
 Thank you! Feel free to use the Issues tab above to submit a bug, or make a pull request/fork to contribute!
 
 #### I would like my content to be removed from this tool!
-Understood! Please shoot me a PM on Reddit and I will gladly remove your content!
+Understood! Please shoot a PM to u/EpicRandomGuy2 on Reddit and I will gladly remove your content!
