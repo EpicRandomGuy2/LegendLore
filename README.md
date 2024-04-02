@@ -20,6 +20,7 @@ And thus the legend began...
 - Sorts are VERY slow. By default, it's sorted by `Created ↓` (from newest to oldest). I recommend applying a `Score` filter before attempting to do any sorts.
 - Multi-tag searches will always be an OR search - ex. `Forest` OR `Fire`. This is an unfortunate limitation of Notion's site hosting, it allows advanced searches on the site's backend but not the public side.
 - `Two-Tag Filter` has been provided, to use it, filter by ONE tag, then scroll down to the secondary tag you are searching for.
+- If all else fails (or you want something very specific, for example "hand-drawn"), you can try searching the word a word (e.g. "drawn") in the `Name` filter or top-right search!
 - `Overview` is very slow, but kind of fun to look at. Give it a minute or so to load.
 - Switch dark/light mode: CTRL + Shift + L
 
