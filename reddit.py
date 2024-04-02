@@ -41,23 +41,22 @@ def get_subreddit_posts(
 
     subreddit_posts = []
 
+    # Gets the latest x posts
+    # Generally a 1000 post limit - not a PRAW issue, a Reddit one
     subreddit_new = reddit.subreddit(subreddit).new(limit=limit)
-
-    # Generally a 1000 post limit - not a PRAW issue, a Reddit one - How can I get more?
-    # Could at least pre-populate the subs with top 1000 of all time
-    # https://psaw.readthedocs.io/en/latest/ might be able to do it, maintains its own link database?
 
     try:
         for post in subreddit_new:
+            # Update causes it to fetch the post anyway, if False it will run much faster
+            # because it stops once it sees an existing post
             if update == False and mongodb_local.post_id_in_db(post.id, subreddit):
                 break
 
+            # Only get posts up to x days old, then exit
             if number_of_days_old != None:
 
                 created_time = datetime.datetime.fromtimestamp(post.created_utc)
-
                 current_time = datetime.datetime.now()
-
                 number_of_days_ago = current_time - datetime.timedelta(
                     days=number_of_days_old
                 )
@@ -65,6 +64,7 @@ def get_subreddit_posts(
                 if created_time < number_of_days_ago:
                     break
 
+            # Extract data of particular interest - this goes into MongoDB
             post_data = {
                 "permalink": post.permalink,
                 "url": post.url,
@@ -80,13 +80,14 @@ def get_subreddit_posts(
                 "sent_to_notion": False,
             }
 
+            # Tries to pull a picture out of the post, if it exists
             try:
                 post_data["media_metadata"] = post.media_metadata
             except AttributeError:
                 pass
 
             for comment in post.comments:
-                # If it's a top level comment made by OP
+                # If it's a top level comment made by OP (usually provides context or interesting info)
                 if (
                     comment.parent_id == f"t3_{post_data['post_id']}"
                     and comment.is_submitter
@@ -94,8 +95,10 @@ def get_subreddit_posts(
                     post_data["comments"].append(comment.body)
 
             subreddit_posts.append(post_data)
-            # print(post_data)
-            # sleep(2)
+
+    # The subreddit generator sometimes fails randomly, usually around 600 or so
+    # Not sure why but feels rate-limit related even though PRAW implements a default backoff
+    # This takes a while to run, so take what we've got and proceed
     except Exception as e:
         print(e)
         print("Probably hit a rate limit, continuing with what we've got...")
@@ -125,9 +128,9 @@ def get_one_subreddit_post(
 
     try:
         post = reddit.submission(post_id)
-        sleep(2)  # 30 requests per minute rate limit
+        sleep(2)  # 30 requests per minute rate limit (allegedly)
     except Exception as e:
-        print("Too many requests, backing off for 2 seconds")
+        print("Too many requests, backing off for 10 seconds")
         sleep(10)
         return get_one_subreddit_post(post_id)
 
@@ -164,6 +167,7 @@ def get_one_subreddit_post(
     return post_data
 
 
+# Function for use with pushshift data - leaving just in case
 def send_historical_posts_to_db(subreddit=DEFAULT_SUBREDDIT):
 
     # Get database client
@@ -173,11 +177,6 @@ def send_historical_posts_to_db(subreddit=DEFAULT_SUBREDDIT):
 
     with open(f"./pushshift/json/{subreddit}_2024.json", "r") as file_json:
         all_posts_json = json.load(file_json)
-
-        # Do this twice for some reason - first load turns it to a string, loads turns it to dict
-        # all_posts_json = json.loads(all_posts_json)
-
-        # print(all_posts_json["submissions"][-1])
 
         subreddit_posts = []
 
@@ -205,15 +204,11 @@ def send_recent_posts_to_db(subreddit=DEFAULT_SUBREDDIT, limit=None):
 
     print(f"Fetching latest posts from r/{subreddit} and sending to MongoDB...")
 
-    # battlemaps
-    # dndmaps
-    # fantasymaps
-    # inkarnate
-    # dungeondraft
     subreddit_posts = get_subreddit_posts(subreddit=subreddit, limit=limit)
     print(len(subreddit_posts))
 
-    # Get database client
+    # Connect to MongoDB's subreddit database and all database
+    # We need to update both together
     database_client = mongodb_local.get_database_client(CONNECTION_STRING, DB_NAME)
     database_subreddit = database_client[subreddit]
     database_all = database_client["all"]
@@ -222,13 +217,10 @@ def send_recent_posts_to_db(subreddit=DEFAULT_SUBREDDIT, limit=None):
 
     # Add maps to database (skip duplicates)
     for post in subreddit_posts:
-        # if not mongodb_local.post_in_db(post["title"], "all"):
         mongodb_local.add_post_to_db(
             post, post["subreddit"], database=database_subreddit
         )
         mongodb_local.add_post_to_db(post, "all", database=database_all)
-        # else:
-        #     print(f"{post['title']} is already in MongoDB, skipping...")
 
 
 def update_recent_scores_in_db(
@@ -239,20 +231,18 @@ def update_recent_scores_in_db(
         f"Fetching posts from r/{subreddit} less than {number_of_days_old} days old and sending new scores to MongoDB..."
     )
 
-    # battlemaps
-    # dndmaps
-    # fantasymaps
-    # inkarnate
-    # dungeondraft
     subreddit_posts = get_subreddit_posts(
         subreddit=subreddit,
         limit=limit,
         update=True,
         number_of_days_old=number_of_days_old,
     )
+
+    # How many posts are getting updated
     print(len(subreddit_posts))
 
-    # Get database client
+    # Connect to MongoDB's subreddit database and all database
+    # We need to update both together
     database_client = mongodb_local.get_database_client(CONNECTION_STRING, DB_NAME)
     database_subreddit = database_client[subreddit]
     database_all = database_client["all"]
@@ -266,14 +256,11 @@ def update_recent_scores_in_db(
 
     # Add maps to database (skip duplicates)
     for post in subreddit_posts:
-        # if not mongodb_local.post_in_db(post["title"], "all"):
         mongodb_local.update_post_score(
             post, post["subreddit"], database=database_subreddit
         )
         updated_score_titles.add(
             mongodb_local.update_post_score(post, "all", database=database_all)
         )
-        # else:
-        #     print(f"{post['title']} is already in MongoDB, skipping...")
 
     return updated_score_titles

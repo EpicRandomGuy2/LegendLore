@@ -1,29 +1,14 @@
 import argparse
-import json
-import requests
-import requests.auth
-import concurrent.futures
-import praw
-import sys
-import datetime
-import threading
-import time
 import traceback
 import mongodb_local
 import reddit
 import notion
 import gpt4v_api
 from time import sleep
-from pymongo import MongoClient
 from config import (
-    APP_NAME,
-    APP_VERSION,
     DB_NAME,
     DEFAULT_SUBREDDIT,
-    CREDENTIALS_FILE,
-    CONNECTION_STRING,
     DB_NAME,
-    TAGS,
     SUBREDDITS,
     NUMBER_OF_DAYS_OLD,
     UPDATE_SCORES_LIMIT,
@@ -59,20 +44,6 @@ def parse_args():
     return [args.database, args.subreddit, args.update_scores]
 
 
-def post_older_than(post, days=7):
-    print(post["created_time"])
-    created_time = datetime.datetime.fromtimestamp(post["created_time"])
-
-    current_time = datetime.datetime.now()
-
-    number_of_days_ago = current_time - datetime.timedelta(days=days)
-
-    if created_time < number_of_days_ago:
-        return True
-    else:
-        return False
-
-
 def main():
 
     # Handle script arguments
@@ -80,20 +51,21 @@ def main():
 
     # To-do: Trigger script on new post to any of the subs
 
+    # Only use this to rebuild the whole Notion database! It takes a very long time!
     # mongodb_local.reset_sent_to_notion()
 
+    # Get all new posts that are not already in the DB
+    # Stops when it finds something that's in the DB
     for subreddit in SUBREDDITS:
         reddit.send_recent_posts_to_db(subreddit)
 
-    # reddit.send_recent_posts_to_db("battlemaps")
-    # reddit.send_recent_posts_to_db("dndmaps")
-    # reddit.send_recent_posts_to_db("FantasyMaps")
-    # reddit.send_recent_posts_to_db("dungeondraft")
-    # reddit.send_recent_posts_to_db("inkarnate")
-
-    update_scores_limit = UPDATE_SCORES_LIMIT
+    # Keep a unique list of titles that get updated to improve runtime
+    # when sending to Notion later
     updated_score_titles = set()
 
+    # Update all scores less than NUMBER_OF_DAYS_OLD
+    # This process takes a very long time and scores stagnate after
+    # a few days, so 7 is the default
     if update_scores:
         number_of_days_old = NUMBER_OF_DAYS_OLD
 
@@ -101,75 +73,47 @@ def main():
             updated_score_titles.update(
                 reddit.update_recent_scores_in_db(
                     subreddit,
-                    limit=update_scores_limit,
+                    limit=UPDATE_SCORES_LIMIT,
                     number_of_days_old=number_of_days_old,
                 )
             )
 
-        # reddit.update_recent_scores_in_db(
-        #     "battlemaps",
-        #     limit=update_scores_limit,
-        #     number_of_days_old=number_of_days_old,
-        # )
-        # reddit.update_recent_scores_in_db(
-        #     "dndmaps", limit=update_scores_limit, number_of_days_old=number_of_days_old
-        # )
-        # reddit.update_recent_scores_in_db(
-        #     "FantasyMaps",
-        #     limit=update_scores_limit,
-        #     number_of_days_old=number_of_days_old,
-        # )
-        # reddit.update_recent_scores_in_db(
-        #     "dungeondraft",
-        #     limit=update_scores_limit,
-        #     number_of_days_old=number_of_days_old,
-        # )
-        # reddit.update_recent_scores_in_db(
-        #     "inkarnate",
-        #     limit=update_scores_limit,
-        #     number_of_days_old=number_of_days_old,
-        # )
-
     # Top x posts, cause we need to update scores too. Also need to cut this so it doesn't run the whole DB (while skipping everything after the first few values)
-    # Ascending=True means newest first -> oldest last, False is oldest first -> newest last
-    # Reversing it to keep the created_time order.
+    # Reversing it to keep the created_time order (newest at the top of the DB)
     # Never update more than the max possible number of scores that were updated.
     all_subreddit_posts = mongodb_local.get_all_posts_from_db("all").sort_values(
         by=["created_time"], ascending=False
-    )[: update_scores_limit * len(SUBREDDITS)][
-        ::-1
-    ]  # [::-1]
+    )[: UPDATE_SCORES_LIMIT * len(SUBREDDITS)][::-1]
 
-    # To-do: Figure out the score issue - other than waiting a week to update, I'm not sure how to get/update the scores. Should I just update all scores less than a week old? Will increase runtime a lot.
-
-    print(len(all_subreddit_posts))
-
+    # Just to keep track of script progress
     count = 0
 
+    # Loop through the last x maps posted to the subreddits (1250 by default)
     for index, post in all_subreddit_posts.iterrows():
-        # Skip if the post is older than 7 days, cause it didn't even get updated score
-        # and updating a Notion post takes a long time
-        # if post_older_than(post, days=7):
-        #     continue
 
-        # Analyze and tag maps
-        # Skip if error, these calls cost money
+        # Analyze and tag maps with GPT4V API
+        # Skip if error, these calls cost money (~0.3 cents per map)
         try:
             print(count)
-            # mongodb_local.reset_post_tags(post, subreddit="gpt_test")
-            # Analyzes post, and if it comes out untagged, second function tries to tag it by passing in a higher res image
 
+            # Only use this to reset tags on a post (you probably don't want to do this, you'll have to pay to re-tag it)
+            # mongodb_local.reset_post_tags(post, subreddit="gpt_test")
+
+            # Analyzes post, and if it comes out untagged, second function tries to tag it by passing in a higher res image (costs ~1 cent per)
             gpt4v_api.analyze_and_tag_post(post, append=False)
             gpt4v_api.analyze_untagged_post(post, append=False)
 
-            # After tagging, we need to update the post for it to send to Notion
+            # After tagging, we need to update the post var for it to send to Notion
             post = mongodb_local.get_post_from_db(post["title"]).iloc[0].to_dict()
         except Exception as e:
+            # Print error and keep going, do not send to Notion
             print(f"Tagging error occurred on {post['title']}, skipping...")
             print(e)
-            # Inform me and keep going, do not send to Notion
             print(traceback.format_exc())
             continue
+
+        # Will try up to 5 times to send to Notion
+        # Failure is a rare case, usually a network issue
 
         max_attempts = 5
         attempts = 1
@@ -185,14 +129,13 @@ def main():
 
                 break
             except Exception as e:
+                # If failure, wait 10 seconds and try again (up to 5 times)
                 print(f"Error occurred on {post['title']}...")
                 print(e)
                 print(traceback.format_exc())
                 print(f"Trying {post['title']} again (Attempt {attempts})...")
                 attempts += 1
                 sleep(10)
-
-        # break # Break after one map
 
         count += 1
 

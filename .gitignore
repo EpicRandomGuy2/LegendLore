@@ -2,3 +2,4 @@ examples
 __pycache__
 credentials.json
 pushshift*
+Dockerfile

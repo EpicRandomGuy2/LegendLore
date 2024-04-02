@@ -1,0 +1,10 @@
+backoff==2.2.1
+beautifulsoup4==4.11.1
+httpx==0.23.0
+notion_client==2.2.1
+openai==1.14.3
+pandas==1.5.3
+praw==7.7.1
+pymongo==4.6.1
+Requests==2.31.0
+zstandard==0.22.0

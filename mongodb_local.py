@@ -1,4 +1,3 @@
-import sys
 from pymongo import MongoClient
 from pandas import DataFrame
 from config import CONNECTION_STRING, DB_NAME, DEFAULT_SUBREDDIT, SUBREDDITS
@@ -22,7 +21,7 @@ def post_in_db(
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
-    # Check to ensure post is unique in DB
+    # Check to ensure post is unique in DB, using title as key
     query = {"title": post_title}
 
     if DataFrame(database.find(query)).empty:
@@ -42,7 +41,7 @@ def post_id_in_db(
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
-    # Check to ensure post is unique in DB
+    # Check to ensure post is unique in DB, using post_id as key
     query = {"post_id": post_id}
 
     if DataFrame(database.find(query)).empty:
@@ -59,10 +58,12 @@ def add_post_to_db(
     database=None,
 ):
 
+    # If DB connection wasn't passed, make a new one
     if database == None:
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
+    # Add post to DB if title isn't found in there
     if not post_in_db(post["title"], subreddit, connection_string, db_name):
         print(f"Adding {post['title']} to MongoDB...")
         database.insert_one(post)
@@ -79,12 +80,13 @@ def add_tags_to_post(
     database=None,
 ):
 
+    # If DB connection wasn't passed, make a new one
     if database == None:
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
+    # Update any matching items in the query (should only be 1)
     query = {"title": post["title"]}
-
     post_df = DataFrame(database.find(query))
 
     for tag in tags:
@@ -96,7 +98,6 @@ def add_tags_to_post(
 
         # Update any matching items in the query (should only be 1)
         for index, row in post_df.iterrows():
-            # print(row["tags"])
             query = {"_id": row["_id"]}
             new = {"$set": {"tags": row["tags"]}}
             database.update_many(query, new)
@@ -116,6 +117,9 @@ def reset_post_tags(
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
+    # confirm_all is if you seriously wanna nuke the tags from the whole database
+    # Don't do this, it'll be the most expensive mistake you've made all week
+    # Because tagging costs $$$
     if confirm_all == False:
         confirm = input(
             f"You are about to reset tags for {post['title']}. This process cannot be undone.\n \
@@ -128,11 +132,10 @@ def reset_post_tags(
                     Type RESET TAGS to continue: "
             )
 
+    # Update any matching items in the query (should only be 1)
     query = {"title": post["title"]}
-
     post_df = DataFrame(database.find(query))
 
-    # Update any matching items in the query (should only be 1)
     for index, row in post_df.iterrows():
         query = {"_id": row["_id"]}
         new = {"$set": {"tags": []}}
@@ -147,6 +150,8 @@ def reset_sent_to_notion(
     db_name=DB_NAME,
     database=None,
 ):
+    # Resetting the sent_to_notion flags to send to a clean Notion database
+    # The rebuild takes a very long time (full LegendLore takes ~2 days to rebuild)
     confirm = input(
         "You are about to set sent_to_notion to False for all MongoDB entries. This will cause the database to lose state with Notion, and require a full Notion rebuild (3+ days).\n \
                 Type RESET NOTION to continue: "
@@ -158,6 +163,7 @@ def reset_sent_to_notion(
                 Type RESET NOTION to continue: "
         )
 
+    # Reset the flag in Mongo for all posts
     for subreddit in subreddits:
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
@@ -180,12 +186,11 @@ def set_sent_to_notion(
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
-    # Check to ensure post is unique in DB
+    # Get post from DB
     query = {"title": post["title"]}
-
     post_df = DataFrame(database.find(query))
 
-    # Update anything matching those keys in the query
+    # Update any matching items in the query (should only be 1)
     for index, row in post_df.iterrows():
         query = {"_id": row["_id"]}
         new = {"$set": {"sent_to_notion": sent}}
@@ -208,9 +213,8 @@ def update_post_score(
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
-    # Check to ensure post is unique in DB
+    # Get post from DB
     query = {"title": post["title"]}
-
     post_df = DataFrame(database.find(query))
 
     # Update anything matching those keys in the query
@@ -218,10 +222,10 @@ def update_post_score(
         query = {"_id": row["_id"]}
         new = {"$set": {"score": post["score"]}}
         database.update_many(query, new)
-        # database_client["all"].update_many(query, new)
 
         print(f"{post['title']} updated score from {row['score']} to {post['score']}")
 
+        # If score updated, return so we know to send it to Notion later
         if row["score"] != post["score"]:
             return post["title"]
 
@@ -237,9 +241,8 @@ def get_post_from_db(
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
-    # Check to ensure post is unique in DB
+    # Get post from DB
     query = {"title": post_title}
-
     return DataFrame(database.find(query))
 
 
@@ -268,7 +271,7 @@ def get_untagged_posts_from_db(
         database_client = get_database_client(connection_string, db_name)
         database = database_client[subreddit]
 
-    # Adding this filter to remove things with a score of 0 - they are usually spam or low-effort, downvoted posts (not maps)
+    # Adding this gte 1 filter to remove things with a score of 0 - they are usually spam or low-effort, downvoted posts (not maps)
     # Necessary to filter out dirty images, even if we miss a couple maps
     # Also get all things tagged Untagged
     return DataFrame(

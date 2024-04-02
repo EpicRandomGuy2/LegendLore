@@ -1,15 +1,7 @@
-import os
-import sys
 import time
-import base64
 import requests
-import re
-import itertools
-import traceback
 import json
-import urllib.parse
 import httpx
-import threading
 import time
 from notion_client import Client
 from notion_client.helpers import collect_paginated_api
@@ -18,7 +10,7 @@ from openai import OpenAI
 from bs4 import BeautifulSoup
 from mongodb_local import get_database_client, get_post_from_db, set_sent_to_notion
 from pandas import DataFrame
-from config import DB_NAME, NOTION_DB_ID, NOTION_DB_NAME, CREDENTIALS_FILE, TAGS
+from config import NOTION_DB_ID, CREDENTIALS_FILE
 from pprint import pprint
 
 
@@ -41,11 +33,11 @@ def send_to_notion(
         and post["sent_to_notion"] == True
         and post["title"] in updated_score_titles
     ):
-        # print(f"Dry run: Updating {post['title']}")
         send_updated_score_to_notion(
             post, subreddit=subreddit, credentials=CREDENTIALS_FILE
         )
         return
+
     # If dupe and no overwrite, skip this post
     elif handle_duplicates(post, overwrite, subreddit=subreddit) == False:
         return
@@ -72,16 +64,20 @@ def send_to_notion(
             # For Town/City, it sometimes tagged very gratuitously on something that should
             # have honestly been regional, so correct that here. Arbitrarily picked 8+, saw
             # some normal battlemaps with 8.
+            # This screws some of the posts but seems to mostly be accurate
             if "Regional/World" in str(post["tags"]):
                 tags = [{"name": "Regional/World"}]
             elif "Town/City" in str(post["tags"]) and len(post["tags"]) >= 8:
                 tags = [{"name": "Regional/World"}]
 
+            # Create the attributes for each post
             body = {
                 "parent": {"database_id": NOTION_DB_ID},
                 "properties": {
                     "Name": {"title": [{"text": {"content": post["title"]}}]},
                     "Tags": {"type": "multi_select", "multi_select": tags},
+                    # Once upon a time I tried to make Creator multi-select, it slowed the database
+                    # so badly I couldn't even delete it correctly. It's prettier but not worth at scale.
                     # "Creator": {
                     #     "type": "select",
                     #     "select": {"name": post["author"].lstrip("u/")},
@@ -101,6 +97,8 @@ def send_to_notion(
                 },
                 "children": [],
             }
+
+            # Create children for each post - the embed and Reddit link
 
             # Different urls need to have embedding handled differently
             if "i.redd.it" in post["url"]:
@@ -157,9 +155,7 @@ def send_to_notion(
                         },
                     )
 
-                    # Check if the request was successful
                     if response.status_code == 200:
-                        # Parse the JSON response
                         data = response.json()
 
                         # print(album_id)
@@ -170,6 +166,7 @@ def send_to_notion(
                             # print(image["link"])
                             try:
                                 direct_links.append(image["link"])
+                            # Skip if error
                             except TypeError as e:
                                 continue
 
@@ -211,10 +208,7 @@ def send_to_notion(
                             "Authorization": f"Client-ID {credentials['imgur_client_id']}"
                         },
                     )
-
-                    # Check if the request was successful
                     if response.status_code == 200:
-                        # Parse the JSON response
 
                         # print("IMGUR SINGLE IMAGE", response.text)
 
@@ -233,10 +227,11 @@ def send_to_notion(
                         print("Imgur Error:", response.status_code)
                         print(modified_url, response.text)
 
+            # To-do:
             # There's a third condition where the link goes somewhere else like Patreon but an image is embedded in the post - figure it out
-            # Condition 5 - post removed from imgur (removed.png) or 404 (not sure why one happens over the other when they both have the same effect)
             # Condition 6 - x-post subreddit
             # Condition 7: Inkarnate.com
+
             # If none of the above set sent_to_notion so it doesn't try again, and skip the actual send
             else:
                 set_sent_to_notion(post, subreddit=subreddit)
@@ -248,19 +243,13 @@ def send_to_notion(
 
             # Embeds for Reddit don't work via Notion API due to an issue with iframely, using bookmarks instead:
             # https://developers.notion.com/changelog/users-can-now-add-equation-blocks-and-media-blocks
+            # If you know how to get Reddit embeds working pleaaaaaase hit me up
             child = [
                 {
                     "object": "block",
                     "type": "bookmark",
                     "bookmark": {
-                        # "caption": [
-                        #     {
-                        #         "type": "text",
-                        #         "text": {"content": str(post["comments"])},
-                        #     }
-                        # ],
-                        "url": "https://www.reddit.com"
-                        + post["permalink"],
+                        "url": "https://www.reddit.com" + post["permalink"],
                     },
                 }
             ]
@@ -274,7 +263,7 @@ def send_to_notion(
             notion_url = f"https://api.notion.com/v1/pages"
 
             response = requests.post(notion_url, data=body, headers=headers)
-            # set_sent_to_notion(post)
+
             if response.status_code == 200:
                 print(f"{post['title']} sent to Notion...")
                 set_sent_to_notion(post, subreddit=subreddit)
@@ -303,18 +292,14 @@ def handle_duplicates(
     if not subreddit:
         subreddit = post["subreddit"]
 
-    # Needed to check if sent_to_notion exists
-
-    ############## Gonna need this again soon
-
-    # post_df = get_post_from_db(post)
-
-    # print(type(post["sent_to_notion"]))
-    # print(post["sent_to_notion"])
+    # If the post has been sent to Notion and we're not overwriting, just skip it
 
     if post["sent_to_notion"] == True and overwrite == False:
         print(f"{post['title']} already tagged sent_to_notion, skipping...")
         return False
+
+    # If it has been sent and we ARE overwriting, need to delete the old post
+    # so the parent function can send the new one
     elif post["sent_to_notion"] == True and overwrite == True:
         print(f"{post['title']} already tagged sent_to_notion, overwriting...")
 
@@ -329,6 +314,7 @@ def handle_duplicates(
             "Notion-Version": "2022-06-28",
         }
 
+        # Search post by title, this can come up with multiple matches, it will delete them all
         notion_search_url = f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query"
         search_payload = {
             "filter": {"property": "Name", "title": {"equals": post["title"]}}
@@ -350,9 +336,6 @@ def handle_duplicates(
                 notion_page_url, json=update_payload, headers=headers
             )
 
-        set_sent_to_notion(post, False, subreddit=subreddit)
-
-        # sys.exit()
         # After deleting the page, set sent_to_notion to False, it will be set True again when it's sent back
         set_sent_to_notion(post, False, subreddit=subreddit)
         return True
@@ -380,6 +363,7 @@ def send_updated_score_to_notion(
         "Notion-Version": "2022-06-28",
     }
 
+    # Get page by title
     notion_search_url = f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query"
     search_payload = {
         "filter": {"property": "Name", "title": {"equals": post["title"]}}
@@ -391,6 +375,7 @@ def send_updated_score_to_notion(
 
     # print(search_response.json())
 
+    # Update score for all pages matching post title
     for page in search_response.json()["results"]:
 
         notion_page_url = f"https://api.notion.com/v1/pages/{page['id']}"
