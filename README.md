@@ -34,6 +34,8 @@ And thus the legend began...
     - [LegendLore](https://legendlore.notion.site/) can currently only handle Reddit and Imgur links/galleries. Working on support for other common sites like Patreon (public) and Inkarnate in the future!
 - Why is this map tagged `Untagged`?
     - Sometimes GPT flips out and refuses to tag an image. When that happens, I ask it again with a more costly, higher resolution version of the image, but if it refuses again, it is what it is and it goes in as `Untagged`. Sorry about that!
+- This isn't a map!
+    - I went off the general assumption that an image (with a score of >= 1 - i.e. not downvoted, to filter out spam) posted to any of the subreddits were going to be maps. Sometimes they're tokens or similar. These usually get slapped with `Untagged`. 
 
 ---
 
