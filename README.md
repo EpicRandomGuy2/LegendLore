@@ -17,9 +17,12 @@ And thus the legend began...
 
 - [LegendLore](https://legendlore.notion.site/) updates with new maps at the top of every hour, and updates scores every 6 hours.
 - To speed up the search, apply at least one filter! It can be slow to load without it. Other views (seen in the tabs at the top of the filters) may also be faster
-- Sorts are VERY slow. By default, it's sorted by `Created ↓` (from newest to oldest). I recommend applying a `Score` filter before attempting to do any sorts.
+- Sorts are VERY slow. By default, it's sorted by `Created ↓` (from newest to oldest). I recommend applying a filter before attempting to do any sorts.
 - Multi-tag searches will always be an OR search - ex. `Forest` OR `Fire`. This is an unfortunate limitation of Notion's site hosting, it allows advanced searches on the site's backend but not the public side.
 - `Two-Tag Filter` has been provided, to use it, filter by ONE tag, then scroll down to the secondary tag you are searching for.
+- If you're finding there are too many world maps in your results, try this: Under the `Tags` filter, there's an option to switch it to `Does Not Contain`. Try that with the `Regional/World` (and if that's not enough, `Town/City`) tags, that should get rid of most of the world maps! You can also filter by subreddit, I'd recommend `r/battlemaps` and `r/dungeondraft` to fully filter out world maps.
+![image](https://github.com/EpicRandomGuy2/LegendLore/assets/163953013/026bde74-c852-4be5-8a95-87e46fc71791)
+
 - If all else fails (or you want something very specific, for example "hand-drawn"), you can try searching the word a word (e.g. "drawn") in the `Name` filter or top-right search!
 - `Overview` is very slow, but kind of fun to look at. Give it a minute or so to load.
 - Switch dark/light mode: CTRL + Shift + L
