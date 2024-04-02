@@ -13,7 +13,7 @@ And thus the legend began...
 
 ✨ _**My hope is that this tool can also help you find your perfect map! Please support the artists of each map by upvoting the original post, or even subscribing via Patreon!**_ ✨
 
-#### Instructions and Tips
+### Instructions and Tips
 
 - [LegendLore](https://legendlore.notion.site/) updates with new maps at the top of every hour, and updates scores every 6 hours.
 - To speed up the search, apply at least one filter! It can be slow to load without it. Other views (seen in the tabs at the top of the filters) may also be faster
@@ -24,7 +24,7 @@ And thus the legend began...
 - `Overview` is very slow, but kind of fun to look at. Give it a minute or so to load.
 - Switch dark/light mode: CTRL + Shift + L
 
-#### Known Issues
+### Known Issues
 - Searching by multiple tags is giving results for either or tag!
     - I know, I tried really hard to bring Advanced Search to the front-end but it's not possible due to Notion limitations. Try the `Two-Tag Filter` instead!
 - The same map is in here twice!
