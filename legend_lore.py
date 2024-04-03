@@ -13,6 +13,7 @@ from config import (
     NUMBER_OF_DAYS_OLD,
     UPDATE_SCORES_LIMIT,
 )
+from name_change import NAME_CHANGE
 
 
 def parse_args():
@@ -32,8 +33,12 @@ def parse_args():
         help="Name of subreddit to parse, e.g. 'battlemaps'",
     )  # Specify subreddit for parsing
     parser.add_argument(
-        "-u",
         "--update-scores",
+        action="store_true",
+        help="Set to update the scores of the most recent 500 posts",
+    )  # Specify subreddit for parsing
+    parser.add_argument(
+        "--update-names",
         action="store_true",
         help="Set to update the scores of the most recent 500 posts",
     )  # Specify subreddit for parsing
@@ -41,13 +46,13 @@ def parse_args():
 
     args = parser.parse_args()
 
-    return [args.database, args.subreddit, args.update_scores]
+    return [args.database, args.subreddit, args.update_scores, args.update_names]
 
 
 def main():
 
     # Handle script arguments
-    db_name, subreddit_name, update_scores = parse_args()
+    db_name, subreddit_name, update_scores, update_names = parse_args()
 
     # To-do: Trigger script on new post to any of the subs
 
@@ -138,6 +143,18 @@ def main():
                 sleep(10)
 
         count += 1
+
+    # If creator has requested a name change in LegendLore, hit the Notion API to update
+    # all instances of that name.
+
+    if update_names == True:
+        print(f"Changing {len(NAME_CHANGE)} names...")
+        # Just to keep track of script progress
+        count = 0
+        for name in NAME_CHANGE:
+            notion.send_updated_username_to_notion(name)
+            print(count)
+            count += 1
 
 
 if __name__ == "__main__":
