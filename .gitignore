@@ -3,3 +3,5 @@ __pycache__
 credentials.json
 pushshift/*
 Dockerfile
+do_not_post.py
+name_change.py

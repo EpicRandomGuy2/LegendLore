@@ -1,3 +1,4 @@
+import os
 import argparse
 import traceback
 import mongodb_local
@@ -13,6 +14,7 @@ from config import (
     NUMBER_OF_DAYS_OLD,
     UPDATE_SCORES_LIMIT,
 )
+from name_change import NAME_CHANGE
 
 
 def parse_args():
@@ -32,8 +34,12 @@ def parse_args():
         help="Name of subreddit to parse, e.g. 'battlemaps'",
     )  # Specify subreddit for parsing
     parser.add_argument(
-        "-u",
         "--update-scores",
+        action="store_true",
+        help="Set to update the scores of the most recent 500 posts",
+    )  # Specify subreddit for parsing
+    parser.add_argument(
+        "--update-names",
         action="store_true",
         help="Set to update the scores of the most recent 500 posts",
     )  # Specify subreddit for parsing
@@ -41,13 +47,14 @@ def parse_args():
 
     args = parser.parse_args()
 
-    return [args.database, args.subreddit, args.update_scores]
+    return [args.database, args.subreddit, args.update_scores, args.update_names]
 
 
 def main():
 
     # Handle script arguments
-    db_name, subreddit_name, update_scores = parse_args()
+    db_name, subreddit_name, update_scores, update_names = parse_args()
+    env = os.getenv("ENV")  # Dev or Prod
 
     # To-do: Trigger script on new post to any of the subs
 
@@ -99,9 +106,10 @@ def main():
             # Only use this to reset tags on a post (you probably don't want to do this, you'll have to pay to re-tag it)
             # mongodb_local.reset_post_tags(post, subreddit="gpt_test")
 
-            # Analyzes post, and if it comes out untagged, second function tries to tag it by passing in a higher res image (costs ~1 cent per)
-            gpt4v_api.analyze_and_tag_post(post, append=False)
-            gpt4v_api.analyze_untagged_post(post, append=False)
+            if env == "PROD":
+                # Analyzes post, and if it comes out untagged, second function tries to tag it by passing in a higher res image (costs ~1 cent per)
+                gpt4v_api.analyze_and_tag_post(post, append=False)
+                gpt4v_api.analyze_untagged_post(post, append=False)
 
             # After tagging, we need to update the post var for it to send to Notion
             post = mongodb_local.get_post_from_db(post["title"]).iloc[0].to_dict()
@@ -138,6 +146,18 @@ def main():
                 sleep(10)
 
         count += 1
+
+    # If creator has requested a name change in LegendLore, hit the Notion API to update
+    # all instances of that name.
+
+    if update_names == True:
+        print(f"Changing {len(NAME_CHANGE)} names...")
+        # Just to keep track of script progress
+        count = 0
+        for name in NAME_CHANGE:
+            notion.send_updated_username_to_notion(name)
+            print(count)
+            count += 1
 
 
 if __name__ == "__main__":

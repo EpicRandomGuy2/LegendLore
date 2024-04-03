@@ -11,6 +11,8 @@ from bs4 import BeautifulSoup
 from mongodb_local import get_database_client, get_post_from_db, set_sent_to_notion
 from pandas import DataFrame
 from config import NOTION_DB_ID, CREDENTIALS_FILE
+from do_not_post import DO_NOT_POST
+from name_change import NAME_CHANGE
 from pprint import pprint
 
 
@@ -36,6 +38,12 @@ def send_to_notion(
         send_updated_score_to_notion(
             post, subreddit=subreddit, credentials=CREDENTIALS_FILE
         )
+        return
+    # If the creator has requested to be excluded from LegendLore, return without posting
+    # set sent_to_notion flag so it won't attempt again in the future
+    elif name_in_do_not_post(post):
+        print(f"{post['title']} - {post['author']} in do_not_post, skipping...")
+        set_sent_to_notion(post, subreddit=subreddit)
         return
 
     # If dupe and no overwrite, skip this post
@@ -98,10 +106,15 @@ def send_to_notion(
                 "children": [],
             }
 
-            # Create children for each post - the embed and Reddit link
+            # If map is tagged [AI] in title, set sent_to_notion so it doesn't try again, and skip the actual send
+            if "[AI]" in post["title"].upper():
+                set_sent_to_notion(post, subreddit=subreddit)
 
+                print(f"{post['title']} is tagged [AI], skipping...")
+                break
+            # Create children for each post - the embed and Reddit link
             # Different urls need to have embedding handled differently
-            if "i.redd.it" in post["url"]:
+            elif "i.redd.it" in post["url"]:
                 child = [
                     {
                         "object": "block",
@@ -344,6 +357,11 @@ def handle_duplicates(
         return True
 
 
+def name_in_do_not_post(post):
+
+    return post["author"] in DO_NOT_POST
+
+
 def send_updated_score_to_notion(
     post,
     subreddit=None,
@@ -382,6 +400,57 @@ def send_updated_score_to_notion(
 
         update_payload = {"properties": {"Score": {"number": post["score"]}}}
         print(f"Updating score for {post['title']} in Notion...")
+
+        update_response = requests.patch(
+            notion_page_url, json=update_payload, headers=headers
+        )
+
+        # print(update_response.json())
+
+
+def send_updated_username_to_notion(name, credentials=CREDENTIALS_FILE):
+
+    print(f"Updating names for {name} -> {NAME_CHANGE[name]} in Notion...")
+
+    with open(credentials) as credentials_json:
+        credentials = json.load(credentials_json)
+
+    token = credentials["notion_token"]
+
+    headers = {
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28",
+    }
+
+    # Get page by title
+    notion_search_url = f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query"
+    search_payload = {
+        "filter": {
+            "property": "Creator",
+            "title": {"equals": name},
+        }
+    }
+
+    search_response = requests.post(
+        notion_search_url, json=search_payload, headers=headers
+    )
+
+    # print(search_response.json())
+
+    # Update score for all pages matching post title
+    for page in search_response.json()["results"]:
+
+        notion_page_url = f"https://api.notion.com/v1/pages/{page['id']}"
+
+        update_payload = {
+            "properties": {
+                "Creator": {
+                    "type": "rich_text",
+                    "rich_text": [{"text": {"content": NAME_CHANGE[name]}}],
+                },
+            }
+        }
 
         update_response = requests.patch(
             notion_page_url, json=update_payload, headers=headers
