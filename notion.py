@@ -106,10 +106,15 @@ def send_to_notion(
                 "children": [],
             }
 
-            # Create children for each post - the embed and Reddit link
+            # If map is tagged [AI] in title, set sent_to_notion so it doesn't try again, and skip the actual send
+            if "[AI]" in post["title"].upper():
+                set_sent_to_notion(post, subreddit=subreddit)
 
+                print(f"{post['title']} is tagged [AI], skipping...")
+                break
+            # Create children for each post - the embed and Reddit link
             # Different urls need to have embedding handled differently
-            if "i.redd.it" in post["url"]:
+            elif "i.redd.it" in post["url"]:
                 child = [
                     {
                         "object": "block",

@@ -1,3 +1,7 @@
+import os
+
+env = os.getenv("ENV")  # Dev or Prod
+
 # Constants
 # Fill these with your own stuff
 APP_NAME = "LegendLore"
@@ -6,7 +10,10 @@ CONNECTION_STRING = "mongodb://localhost:27017/"
 DB_NAME = "MapTaggerReddit"
 DEFAULT_SUBREDDIT = "all"
 CREDENTIALS_FILE = "credentials.json"
-NOTION_DB_ID = "95830a9189804ba29e9681e78b0236af"
+if env == "PROD":
+    NOTION_DB_ID = "95830a9189804ba29e9681e78b0236af"  # Prod Notion
+else:
+    NOTION_DB_ID = "e7d05d2c6280444698b59fa79df3f78f"  # Dev Notion
 NOTION_DB_NAME = "LegendLore"
 NUMBER_OF_DAYS_OLD = 7
 UPDATE_SCORES_LIMIT = 250

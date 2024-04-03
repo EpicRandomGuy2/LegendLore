@@ -1,3 +1,4 @@
+import os
 import argparse
 import traceback
 import mongodb_local
@@ -53,6 +54,7 @@ def main():
 
     # Handle script arguments
     db_name, subreddit_name, update_scores, update_names = parse_args()
+    env = os.getenv("ENV")  # Dev or Prod
 
     # To-do: Trigger script on new post to any of the subs
 
@@ -104,9 +106,10 @@ def main():
             # Only use this to reset tags on a post (you probably don't want to do this, you'll have to pay to re-tag it)
             # mongodb_local.reset_post_tags(post, subreddit="gpt_test")
 
-            # Analyzes post, and if it comes out untagged, second function tries to tag it by passing in a higher res image (costs ~1 cent per)
-            gpt4v_api.analyze_and_tag_post(post, append=False)
-            gpt4v_api.analyze_untagged_post(post, append=False)
+            if env == "PROD":
+                # Analyzes post, and if it comes out untagged, second function tries to tag it by passing in a higher res image (costs ~1 cent per)
+                gpt4v_api.analyze_and_tag_post(post, append=False)
+                gpt4v_api.analyze_untagged_post(post, append=False)
 
             # After tagging, we need to update the post var for it to send to Notion
             post = mongodb_local.get_post_from_db(post["title"]).iloc[0].to_dict()
