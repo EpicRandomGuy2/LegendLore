@@ -131,7 +131,7 @@ def main():
             try:
                 notion.send_to_notion(
                     post,
-                    overwrite=True,
+                    overwrite=False,
                     ignore_sent_to_notion=IGNORE_SENT_TO_NOTION,
                     update_score=update_scores,
                     updated_score_titles=updated_score_titles,
