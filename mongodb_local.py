@@ -1,6 +1,12 @@
 from pymongo import MongoClient
 from pandas import DataFrame
-from config import CONNECTION_STRING, DB_NAME, DEFAULT_SUBREDDIT, SUBREDDITS
+from config import (
+    CONNECTION_STRING,
+    DB_NAME,
+    DEFAULT_SUBREDDIT,
+    SUBREDDITS,
+    IGNORE_SENT_TO_NOTION,
+)
 
 
 def get_database_client(connection_string=CONNECTION_STRING, db_name=DB_NAME):
@@ -181,23 +187,23 @@ def set_sent_to_notion(
     db_name=DB_NAME,
     database=None,
 ):
+    if not IGNORE_SENT_TO_NOTION:
+        if database == None:
+            database_client = get_database_client(connection_string, db_name)
+            database = database_client[subreddit]
 
-    if database == None:
-        database_client = get_database_client(connection_string, db_name)
-        database = database_client[subreddit]
+        # Get post from DB
+        query = {"title": post["title"]}
+        post_df = DataFrame(database.find(query))
 
-    # Get post from DB
-    query = {"title": post["title"]}
-    post_df = DataFrame(database.find(query))
+        # Update any matching items in the query (should only be 1)
+        for index, row in post_df.iterrows():
+            query = {"_id": row["_id"]}
+            new = {"$set": {"sent_to_notion": sent}}
+            database.update_many(query, new)
+            database_client["all"].update_many(query, new)
 
-    # Update any matching items in the query (should only be 1)
-    for index, row in post_df.iterrows():
-        query = {"_id": row["_id"]}
-        new = {"$set": {"sent_to_notion": sent}}
-        database.update_many(query, new)
-        database_client["all"].update_many(query, new)
-
-        # print(f"sent_to_notion {sent} added to {post_df['title']}")
+            # print(f"sent_to_notion {sent} added to {post_df['title']}")
 
 
 def update_post_score(

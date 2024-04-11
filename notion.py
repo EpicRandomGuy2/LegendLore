@@ -1,4 +1,5 @@
 import time
+import re
 import requests
 import json
 import httpx
@@ -10,7 +11,7 @@ from openai import OpenAI
 from bs4 import BeautifulSoup
 from mongodb_local import get_database_client, get_post_from_db, set_sent_to_notion
 from pandas import DataFrame
-from config import NOTION_DB_ID, CREDENTIALS_FILE
+from config import NOTION_DB_ID, CREDENTIALS_FILE, IGNORE_SENT_TO_NOTION
 from do_not_post import DO_NOT_POST
 from name_change import NAME_CHANGE
 from pprint import pprint
@@ -19,6 +20,7 @@ from pprint import pprint
 def send_to_notion(
     post,
     overwrite=False,
+    ignore_sent_to_notion=IGNORE_SENT_TO_NOTION,
     update_score=False,
     updated_score_titles=set(),
     subreddit=None,
@@ -47,7 +49,15 @@ def send_to_notion(
         return
 
     # If dupe and no overwrite, skip this post
-    elif handle_duplicates(post, overwrite, subreddit=subreddit) == False:
+    elif (
+        handle_duplicates(
+            post,
+            overwrite,
+            ignore_sent_to_notion=ignore_sent_to_notion,
+            subreddit=subreddit,
+        )
+        == False
+    ):
         return
     # Else if post does not exist, or if we are overwriting, make post as usual
 
@@ -96,6 +106,7 @@ def send_to_notion(
                             {"text": {"content": post["author"].lstrip("u/")}}
                         ],
                     },
+                    "Link": {"url": get_creator_link(post)},
                     "Score": {"type": "number", "number": post["score"]},
                     "Subreddit": {
                         "type": "multi_select",
@@ -269,6 +280,53 @@ def send_to_notion(
 
             body["children"].extend(child)
 
+            # Append first comment child if it exists, else skip and move on
+            try:
+                first_comment = post["comments"][0]
+
+                # API only accepts 2000 characters per block - need to break it up
+                number_of_blocks = (len(first_comment) // 2000) + 1
+                word_break_index = 0
+                new_block_first_word = ""
+
+                for i in range(0, number_of_blocks):
+
+                    # Logic to stop blocks from splitting words down the middle
+                    word_block = first_comment[2000 * i : 2000 * (i + 1)]
+
+                    # On the last loop we need the last word, there will be no rightmost_space
+                    # so set it to take the highest possible index
+                    if i != number_of_blocks - 1:
+                        rightmost_space = word_block.rfind(" ")
+
+                    else:
+                        # Stops the last part of the post from getting cut off due to no space
+                        rightmost_space = 2000
+
+                    word_break_index = 2000 * i + rightmost_space
+
+                    child = [
+                        {
+                            "object": "block",
+                            "type": "quote",
+                            "quote": {
+                                "rich_text": parse_markdown_links(
+                                    new_block_first_word
+                                    + first_comment[2000 * i : word_break_index]
+                                )
+                            },
+                        }
+                    ]
+
+                    # Don't include the space in the new block
+                    new_block_first_word = word_block[rightmost_space + 1 :]
+
+                    # print(child)
+
+                    body["children"].extend(child)
+            except IndexError as e:
+                pass
+
             body = json.dumps(body)
 
             # print(body)
@@ -298,9 +356,14 @@ def send_to_notion(
 def handle_duplicates(
     post,
     overwrite,
+    ignore_sent_to_notion=IGNORE_SENT_TO_NOTION,
     subreddit=None,
     credentials=CREDENTIALS_FILE,
 ):
+
+    # If rebuilding the whole database, no need for dupe handling (this speeds things up a ton)
+    if ignore_sent_to_notion:
+        return True
 
     if not subreddit:
         subreddit = post["subreddit"]
@@ -360,6 +423,48 @@ def handle_duplicates(
 def name_in_do_not_post(post):
 
     return post["author"] in DO_NOT_POST
+
+
+# Need a parser because Notion is wack and doesn't natively do markdown. Only doing it for links for now.
+def parse_markdown_links(text):
+    pattern = r"\[([^\]]+)\]\((http[s]?://[^\)]+)\)|http[s]?://[\w./%?#=-]+"
+    segments = []
+    last_end = 0
+
+    for match in re.finditer(pattern, text):
+        start_text = text[last_end : match.start()]
+        if start_text:
+            # At the risk of chopping off a few letters, do not let this be longer than 2000 or Notion's API will error
+            segments.append({"type": "text", "text": {"content": start_text[:2000]}})
+
+        if match.group(1) and match.group(2):
+            link_text = match.group(1)  # Link text
+            link_url = match.group(2)  # URL
+            segments.append(
+                {
+                    "type": "text",
+                    "text": {"content": link_text, "link": {"url": link_url}},
+                    "annotations": {"bold": True},
+                }
+            )
+        else:
+            link_url = match.group(0)  # The entire match is the URL
+            segments.append(
+                {
+                    "type": "text",
+                    "text": {"content": link_url, "link": {"url": link_url}},
+                }
+            )
+
+        last_end = match.end()
+
+    # Text after the last link (if any)
+    remaining_text = text[last_end:]
+    if remaining_text:
+        # At the risk of chopping off a few letters, do not let this be longer than 2000 or Notion's API will error
+        segments.append({"type": "text", "text": {"content": remaining_text[:2000]}})
+
+    return segments
 
 
 def send_updated_score_to_notion(
@@ -457,3 +562,104 @@ def send_updated_username_to_notion(name, credentials=CREDENTIALS_FILE):
         )
 
         # print(update_response.json())
+
+
+def get_creator_link(post, credentials=CREDENTIALS_FILE):
+    # Returns None if no url (empty string throws an API error)
+    creator_link = None
+
+    # If there is a comment
+    if len(post["comments"]) > 0:
+        # Url regex
+        pattern = r"http[s]?://(?:[a-zA-Z]|[0-9]|[_#?./%=-])+"
+
+        urls = re.findall(pattern, post["comments"][0])
+
+        # Get the first Patreon link - Doing a loop to check for Patreon links first
+        # to set them as higher priority (if it goes in order it might grab a wikipedia link or something)
+        for url in urls:
+            if "patreon" in url:
+                creator_link = url
+                return creator_link
+
+        # If no Patreon link just get the first other non-imgur non-reddit link
+        # (right 99% of the time, sometimes it grabs silly links like wikipedia)
+        for url in urls:
+            if not "imgur" in url and not "reddit" in url:
+                creator_link = url
+                return creator_link
+
+    # If no url return None
+    return creator_link
+
+
+# Untested, unused function - for updating links on existing pages only
+# def send_creator_link_to_notion(post, credentials=CREDENTIALS_FILE):
+
+#     print(f"Adding Patreon link for {post['author']} in Notion...")
+
+#     with open(credentials) as credentials_json:
+#         credentials = json.load(credentials_json)
+
+#     token = credentials["notion_token"]
+
+#     headers = {
+#         "Authorization": "Bearer " + token,
+#         "Content-Type": "application/json",
+#         "Notion-Version": "2022-06-28",
+#     }
+
+#     # Get page by title
+#     notion_search_url = f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query"
+#     search_payload = {
+#         "filter": {"property": "Name", "title": {"equals": post["title"]}}
+#     }
+
+#     search_response = requests.post(
+#         notion_search_url, json=search_payload, headers=headers
+#     )
+
+#     # print(search_response.json())
+
+#     # Update score for all pages matching post title
+#     for page in search_response.json()["results"]:
+
+#         notion_page_url = f"https://api.notion.com/v1/pages/{page['id']}"
+
+#         # Returns None if no url (empty string throws an API error)
+#         creator_link = None
+
+#         try:
+#             # Url regex
+#             pattern = r"http[s]?://(?:[a-zA-Z]|[0-9]|[_#?./%=-])+"
+
+#             urls = re.findall(pattern, post["comments"][0])
+
+#             Get the first Patreon link - Doing a loop to check for Patreon links first
+#             to set them as higher priority (if it goes in order it might grab a wikipedia link or something)
+#             for url in urls:
+#                 if "patreon" in url:
+#                     creator_link = url
+#                     return creator_link
+
+#             # Get the first Patreon link
+#             for url in urls:
+#                 # Filter out Imgur and Reddit cause they're usually not going to a creator's site
+#                 if not "imgur" in url and not "reddit" in url:
+#                     creator_link = url
+#                     break
+
+#             update_payload = {
+#                 "properties": {
+#                     "Creator": {"url": creator_link},
+#                 },
+#             }
+
+#             update_response = requests.patch(
+#                 notion_page_url, json=update_payload, headers=headers
+#             )
+
+#         except IndexError as e:
+#             print(post["title"], "error adding creator_link:", e)
+
+#         # print(update_response.json())

@@ -13,6 +13,7 @@ from config import (
     SUBREDDITS,
     NUMBER_OF_DAYS_OLD,
     UPDATE_SCORES_LIMIT,
+    IGNORE_SENT_TO_NOTION,
 )
 from name_change import NAME_CHANGE
 
@@ -130,10 +131,13 @@ def main():
             try:
                 notion.send_to_notion(
                     post,
-                    overwrite=False,
+                    overwrite=True,
+                    ignore_sent_to_notion=IGNORE_SENT_TO_NOTION,
                     update_score=update_scores,
                     updated_score_titles=updated_score_titles,
                 )
+
+                # notion.send_creator_link_to_notion(post)
 
                 break
             except Exception as e:
