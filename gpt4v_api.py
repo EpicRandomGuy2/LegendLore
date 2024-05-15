@@ -220,7 +220,7 @@ def gpt4v_analyze_image(post, resolution="low", credentials=CREDENTIALS_FILE):
     else:
 
         payload = {
-            "model": "gpt-4-vision-preview",
+            "model": "gpt-4o",
             "messages": [
                 {
                     "role": "user",
