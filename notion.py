@@ -513,7 +513,7 @@ def send_updated_score_to_notion(
         # print(update_response.json())
 
 
-def send_updated_username_to_notion(name, credentials=CREDENTIALS_FILE):
+def send_updated_username_to_notion(name, posts, credentials=CREDENTIALS_FILE):
 
     print(f"Updating names for {name} -> {NAME_CHANGE[name]} in Notion...")
 
@@ -544,6 +544,7 @@ def send_updated_username_to_notion(name, credentials=CREDENTIALS_FILE):
     # print(search_response.json())
 
     # Update score for all pages matching post title
+    count = 1
     for page in search_response.json()["results"]:
 
         notion_page_url = f"https://api.notion.com/v1/pages/{page['id']}"
@@ -556,12 +557,17 @@ def send_updated_username_to_notion(name, credentials=CREDENTIALS_FILE):
                 },
             }
         }
-
+        
         update_response = requests.patch(
             notion_page_url, json=update_payload, headers=headers
         )
 
         # print(update_response.json())
+
+        print(count)
+        count += 1
+
+    incorrect_updated_username_hotfix(name, posts)
 
 
 def get_creator_link(post, credentials=CREDENTIALS_FILE):
@@ -591,6 +597,76 @@ def get_creator_link(post, credentials=CREDENTIALS_FILE):
 
     # If no url return None
     return creator_link
+
+
+def incorrect_updated_username_hotfix(name, posts, credentials=CREDENTIALS_FILE):
+
+    print(f"Fixing names for {NAME_CHANGE[name]} in Notion...")
+
+    with open(credentials) as credentials_json:
+        credentials = json.load(credentials_json)
+
+    token = credentials["notion_token"]
+
+    headers = {
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28",
+    }
+
+    # Get all pages with incorrectly updated names
+    notion_search_url = f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query"
+    search_payload = {
+        "filter": {
+            "property": "Creator",
+            "title": {"equals": NAME_CHANGE[name]},
+        }
+    }
+
+    search_response = requests.post(
+        notion_search_url, json=search_payload, headers=headers
+    )
+
+    # print(search_response.json())
+
+    # Revert all those pages back to their original names from MongoDB
+    count = 1
+    for page in search_response.json()["results"]:
+
+        notion_title = page["properties"]["Name"]["title"][0]["text"]["content"]
+
+        post = get_post_from_db(notion_title).iloc[0].to_dict()
+
+        db_author = post["author"].lstrip("u/")
+
+        notion_creator = page["properties"]["Creator"]["rich_text"][0]["text"][
+            "content"
+        ]
+
+        # If there's both a Notion page mismatch and DB mismatch
+        if db_author != notion_creator and db_author != name:
+            print(f"Correcting {notion_creator} to {db_author} on {notion_title}...")
+            corrected_name = db_author
+        else:
+            continue
+
+        notion_page_url = f"https://api.notion.com/v1/pages/{page['id']}"
+
+        update_payload = {
+            "properties": {
+                "Creator": {
+                    "type": "rich_text",
+                    "rich_text": [{"text": {"content": corrected_name}}],
+                },
+            }
+        }
+
+        update_response = requests.patch(
+            notion_page_url, json=update_payload, headers=headers
+        )
+
+        print(count)
+        count += 1
 
 
 # Untested, unused function - for updating links on existing pages only
