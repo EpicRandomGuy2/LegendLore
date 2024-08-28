@@ -159,7 +159,7 @@ def main():
         # Just to keep track of script progress
         count = 0
         for name in NAME_CHANGE:
-            notion.send_updated_username_to_notion(name)
+            notion.send_updated_username_to_notion(name, all_subreddit_posts)
             print(count)
             count += 1
 
