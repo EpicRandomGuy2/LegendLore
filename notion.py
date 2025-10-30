@@ -130,8 +130,8 @@ def send_to_notion(
                 child = [
                     {
                         "object": "block",
-                        "embed": {"url": post["url"]},
-                    },
+                        "image": {"type": "external", "external": {"url": post["url"]}},
+                    }
                 ]
 
                 body["children"].extend(child)
@@ -142,7 +142,10 @@ def send_to_notion(
                         child = [
                             {
                                 "object": "block",
-                                "embed": {"url": image["s"]["u"]},
+                                "image": {
+                                    "type": "external",
+                                    "external": {"url": image["s"]["u"]},
+                                },
                             },
                         ]
 
